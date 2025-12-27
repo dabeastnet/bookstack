@@ -1,0 +1,16 @@
+bookstack-dockerized.zip contents:
+.
+├── Dockerfile
+├── .dockerignore
+├── docker-compose.yml
+├── README.md
+├── LOCAL_TESTING.md
+├── FILE_TREE.txt
+└── docker/
+    ├── nginx.conf
+    ├── php.ini
+    ├── supervisord.conf
+    ├── entrypoint.sh
+    ├── run-web.sh
+    ├── run-worker.sh
+    └── run-scheduler.sh

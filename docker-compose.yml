@@ -1,0 +1,108 @@
+version: '3.8'
+
+services:
+  bookstack:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: bookstack-local:latest
+    ports:
+      - "8080:8080"
+    depends_on:
+      - db
+      - redis
+    environment:
+      # IMPORTANT: All BookStack replicas (web/worker/scheduler) must share the same APP_KEY.
+      # Generate once for local testing (no host PHP required):
+      #   docker run --rm php:8.3-cli-alpine php -r 'echo "base64:".base64_encode(random_bytes(32))."\n";'
+      # Then set it for compose via either:
+      #   export APP_KEY='<value>'
+      # or create a .env file next to this compose file containing:
+      #   APP_KEY=<value>
+      APP_KEY: ${APP_KEY}
+      APP_ENV: local
+      APP_DEBUG: "false"
+      APP_URL: http://localhost:8080
+      DB_CONNECTION: mysql
+      DB_HOST: db
+      DB_PORT: 3306
+      DB_DATABASE: bookstack
+      DB_USERNAME: bookstack
+      DB_PASSWORD: secret
+      CACHE_DRIVER: redis
+      SESSION_DRIVER: redis
+      REDIS_SERVERS: redis:6379:0
+      QUEUE_CONNECTION: redis
+      FILE_UPLOAD_SIZE_LIMIT: 50
+      STORAGE_TYPE: local
+      # Migrations are enabled here for first-run local testing only.
+      RUN_MIGRATIONS: "true"
+    # Do not bind-mount the repo by default.
+    # A bind-mount would override the image's vendor/ directory, breaking artisan
+    # commands unless you also run composer on the host. Rely on the baked image instead.
+    command: web
+    restart: unless-stopped
+
+  worker:
+    image: bookstack-local:latest
+    depends_on:
+      - bookstack
+    environment:
+      APP_KEY: ${APP_KEY}
+      APP_ENV: local
+      APP_DEBUG: "false"
+      DB_CONNECTION: mysql
+      DB_HOST: db
+      DB_PORT: 3306
+      DB_DATABASE: bookstack
+      DB_USERNAME: bookstack
+      DB_PASSWORD: secret
+      CACHE_DRIVER: redis
+      SESSION_DRIVER: redis
+      REDIS_SERVERS: redis:6379:0
+      QUEUE_CONNECTION: redis
+      STORAGE_TYPE: local
+    command: worker
+    restart: unless-stopped
+
+  scheduler:
+    image: bookstack-local:latest
+    depends_on:
+      - bookstack
+    environment:
+      APP_KEY: ${APP_KEY}
+      APP_ENV: local
+      APP_DEBUG: "false"
+      DB_CONNECTION: mysql
+      DB_HOST: db
+      DB_PORT: 3306
+      DB_DATABASE: bookstack
+      DB_USERNAME: bookstack
+      DB_PASSWORD: secret
+      CACHE_DRIVER: redis
+      SESSION_DRIVER: redis
+      REDIS_SERVERS: redis:6379:0
+      QUEUE_CONNECTION: redis
+      STORAGE_TYPE: local
+    command: scheduler
+    restart: unless-stopped
+
+  db:
+    image: mariadb:11.2
+    environment:
+      MYSQL_ROOT_PASSWORD: rootsecret
+      MYSQL_DATABASE: bookstack
+      MYSQL_USER: bookstack
+      MYSQL_PASSWORD: secret
+    volumes:
+      - db-data:/var/lib/mysql
+    ports:
+      - "3306:3306"
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+
+volumes:
+  db-data:

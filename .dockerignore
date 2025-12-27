@@ -1,0 +1,19 @@
+# Ignore files and directories not required in the final image.  This
+# significantly reduces the build context size and avoids leaking
+# development artefacts into the container.  Note that vendor and
+# node_modules will be populated during the build process via
+# Composer and any asset build step, so they can be excluded from
+# copying by default.
+
+.git
+.github
+node_modules
+vendor
+storage/logs
+storage/framework/cache
+storage/framework/sessions
+public/uploads
+tests
+*.md
+docker-compose.yml
+Dockerfile
