@@ -87,11 +87,27 @@ FROM php:8.3-fpm-alpine AS runtime
 # PHP requests to php‑fpm.  Supervisord manages both processes and
 # ensures they run in the foreground.  The curl binary is installed
 # solely for the health check defined later.
+# RUN apk add --no-cache \
+#         nginx \
+#         supervisor \
+#         curl \
+#         bash
 RUN apk add --no-cache \
-        nginx \
-        supervisor \
-        curl \
-        bash
+    nginx \
+    supervisor \
+    curl \
+    bash \
+    libzip \
+    libpng \
+    libjpeg-turbo \
+    freetype \
+    oniguruma \
+    libxml2 \
+    zlib
+
+# Copy compiled extensions and enablement files from the builder.
+COPY --from=builder /usr/local/lib/php/extensions /usr/local/lib/php/extensions
+COPY --from=builder /usr/local/etc/php/conf.d /usr/local/etc/php/conf.d
 
 # Copy the PHP configuration tuned for production.  Settings such as
 # memory_limit, upload limits and disabled PHP exposure are defined

@@ -90,10 +90,12 @@ services:
   db:
     image: mariadb:11.2
     environment:
-      MYSQL_ROOT_PASSWORD: rootsecret
-      MYSQL_DATABASE: bookstack
-      MYSQL_USER: bookstack
-      MYSQL_PASSWORD: secret
+      MARIADB_ROOT_PASSWORD: rootsecret
+      MARIADB_DATABASE: bookstack
+      MARIADB_USER: bookstack
+      MARIADB_PASSWORD: secret
+      MARIADB_ROOT_HOST: "%"
+
     volumes:
       - db-data:/var/lib/mysql
     ports:

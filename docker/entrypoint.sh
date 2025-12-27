@@ -84,7 +84,8 @@ case "$1" in
         ;;
     scheduler)
         log "Starting scheduler..."
-        exec php artisan schedule:work --verbose --no-interaction --timezone=${APP_TIMEZONE:-UTC}
+        # Laravel’s schedule:work no longer accepts a --timezone flag; set timezone via APP_TIMEZONE instead.
+        exec php artisan schedule:work --verbose --no-interaction
         ;;
     *)
         # Fall back to whatever the user passed, without init steps.
