@@ -151,9 +151,12 @@ RUN addgroup -g 1000 bookstack && adduser -D -u 1000 -G bookstack bookstack \
     && mkdir -p storage bootstrap/cache public/uploads \
     && chown -R bookstack:bookstack storage bootstrap/cache public/uploads
 
-# Log directory
+
+# Make sure Nginx can open its default log files when running as bookstack
 RUN mkdir -p /var/lib/nginx/logs /var/lib/nginx/tmp/client_body \
+    && touch /var/lib/nginx/logs/error.log /var/lib/nginx/logs/access.log \
     && chown -R bookstack:bookstack /var/lib/nginx
+
 
 
 # Expose a non‑privileged port.  The web server listens on port
