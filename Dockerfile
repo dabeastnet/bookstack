@@ -151,6 +151,11 @@ RUN addgroup -g 1000 bookstack && adduser -D -u 1000 -G bookstack bookstack \
     && mkdir -p storage bootstrap/cache public/uploads \
     && chown -R bookstack:bookstack storage bootstrap/cache public/uploads
 
+# Log directory
+RUN mkdir -p /var/lib/nginx/logs /var/lib/nginx/tmp/client_body \
+    && chown -R bookstack:bookstack /var/lib/nginx
+
+
 # Expose a non‑privileged port.  The web server listens on port
 # 8080; this can be mapped to port 80 or 443 by the orchestrator.
 EXPOSE 8080
