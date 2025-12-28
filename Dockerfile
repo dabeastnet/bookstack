@@ -157,6 +157,7 @@ RUN mkdir -p /var/lib/nginx/logs /var/lib/nginx/tmp/client_body \
     && touch /var/lib/nginx/logs/error.log /var/lib/nginx/logs/access.log \
     && chown -R bookstack:bookstack /var/lib/nginx
 
+RUN mkdir -p /tmp/nginx/{client_body,proxy,fastcgi,uwsgi,scgi} && chmod -R 777 /tmp/nginx
 
 
 # Expose a non‑privileged port.  The web server listens on port
