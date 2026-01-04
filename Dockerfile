@@ -110,6 +110,8 @@ RUN apk add --no-cache \
 COPY --from=builder /usr/local/lib/php/extensions /usr/local/lib/php/extensions
 COPY --from=builder /usr/local/etc/php/conf.d /usr/local/etc/php/conf.d
 
+
+
 # Copy the tuned PHP configuration.  This file defines sensible
 # production defaults such as memory limits and upload size.
 COPY docker/php.ini /usr/local/etc/php/php.ini
