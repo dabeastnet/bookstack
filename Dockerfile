@@ -1,20 +1,32 @@
-# Use multi-stage builds to create a production‑ready BookStack container.
-# The builder stage uses a PHP image with development tools to install
-# dependencies. The final stage contains only what’s required to run the
-# application together with a lightweight HTTP server.  Using
-# separate stages keeps the runtime small and secure.
+# Production-ready Dockerfile for BookStack with pinned component versions
+#
+# This Dockerfile builds a BookStack image using a multi‑stage build.  It pins
+# the PHP and Alpine versions to ensure reproducible builds and explicitly
+# enables GD with JPEG and FreeType support.  Composer is also pinned to
+# a known version for dependency installation.  The runtime stage installs
+# only the libraries required to run the compiled PHP extensions and sets
+# up an unprivileged user with appropriate permissions.
 
 ###############################
 # 1) Builder stage
 ###############################
-FROM php:8.3-fpm-alpine AS builder
 
-# Install build and runtime dependencies.  The builder needs tools
-# like git and unzip to fetch and unpack Composer packages.  We
-# deliberately install only the extensions required by the BookStack
-# manual installation requirements【960969724376565†L96-L105】 to keep the
-# image minimal.  These include GD for image manipulation,
-# DOM/XML for HTML parsing, and Zip for archive support.
+# Pin the PHP and Alpine versions via build arguments.  Adjust these
+# values when upgrading BookStack; using specific tags prevents the
+# underlying base image from changing unexpectedly.  See the PHP
+# official Docker image documentation for available tags.
+ARG PHP_VERSION=8.3.3
+ARG ALPINE_VERSION=3.19
+
+# The builder uses a PHP image with development tools to compile
+# extensions and install dependencies.  We pin the full tag to
+# `php:8.3.3-fpm-alpine3.19` to avoid pull drift.  Optionally you can
+# append a digest (@sha256:...) for even stronger reproducibility.
+FROM php:${PHP_VERSION}-fpm-alpine${ALPINE_VERSION} AS builder
+
+# Install development headers and libraries needed to build PHP
+# extensions.  Versions can be pinned (pkg=ver) if desired by
+# inspecting the package repository for Alpine ${ALPINE_VERSION}.
 RUN apk add --no-cache \
         git \
         unzip \
@@ -31,108 +43,89 @@ RUN apk add --no-cache \
         mbstring \
         xml \
         dom \
-        gd \
         zip \
         bcmath \
         pcntl \
     && docker-php-ext-enable opcache
 
-# Install Composer.  Composer is needed to install PHP dependencies
-# during the build.  The official installer signature is checked
-# automatically by the installer script.
-RUN curl -sS https://getcomposer.org/installer | php -- --install-dir=/usr/local/bin --filename=composer
+# Enable GD with JPEG and FreeType support.  This ensures that
+# BookStack can generate thumbnails from JPEG images.  Without
+# `--with-jpeg` JPEG support would be disabled【686742135763062†L33-L37】.
+RUN docker-php-ext-configure gd --with-freetype --with-jpeg \
+    && docker-php-ext-install -j$(nproc) gd
 
-# Set working directory and copy project files into the builder.  The
-# build context should contain a checked‑out BookStack release.  Only
-# composer.json/lock are copied initially to leverage Docker layer
-# caching when dependencies have not changed.
+# Pin Composer to a specific version for deterministic dependency
+# installation.  Here we use Composer 2.7.1 but you can update it as
+# needed.  The SHA384 signature is not checked because the installer
+# script downloads the phar directly.
+ARG COMPOSER_VERSION=2.7.1
+RUN curl -fsSL "https://getcomposer.org/download/${COMPOSER_VERSION}/composer.phar" -o /usr/local/bin/composer \
+    && chmod +x /usr/local/bin/composer
+
+# Set working directory and copy composer manifests.  Copying only the
+# manifests first leverages Docker layer caching when dependencies
+# haven't changed.
 WORKDIR /build/bookstack
 COPY composer.json composer.lock ./
 
-# Install PHP dependencies without development packages.  We disable
-# script execution here because BookStack's composer hooks assume
-# that the application source has already been copied.  Running
-# composer with --no-scripts allows us to install the vendor
-# dependencies without triggering those scripts prematurely.  We
-# intentionally omit --optimize-autoloader at this stage since we
-# generate an optimised autoloader after the full source is present.
+# Install PHP dependencies without executing scripts.  We disable
+# scripts because BookStack's composer hooks rely on the full source
+# being present【960969724376565†L96-L105】.  Running with `--no-scripts` allows
+# vendor installation while avoiding these hooks at this stage.
 RUN composer install --no-dev --prefer-dist --no-interaction --no-scripts
 
-# Once dependencies are installed, copy the remainder of the
-# application source.  This includes the application code, public
-# assets and configuration files.  The .dockerignore file should
-# exclude files not needed in the final image.
+# Copy the remainder of the application source into the build stage.
 COPY . .
 
-# Now that the full application source is available we can build
-# the optimised autoloader and run composer scripts.  The
-# post-autoload-dump scripts defined by BookStack require files in
-# the app directory, so this must occur after the COPY above.
+# Optimise the autoloader now that the full codebase is available.
 RUN composer dump-autoload --optimize
 
-# Perform a basic build step by caching the configuration.  Since
-# configuration is loaded from environment variables at runtime we
-# cannot fully cache config here, but optimising the autoloader
-# improves startup times.
+# Clear cached configuration and views.  These will be rebuilt at
+# runtime based on environment variables.
 RUN php artisan config:clear && php artisan view:clear && php artisan event:clear
-
 
 ###############################
 # 2) Runtime stage
 ###############################
-FROM php:8.3-fpm-alpine AS runtime
 
-# Install runtime packages.  We include a minimal HTTP server and
-# process supervisor.  Nginx serves the public directory and proxies
-# PHP requests to php‑fpm.  Supervisord manages both processes and
-# ensures they run in the foreground.  The curl binary is installed
-# solely for the health check defined later.
-# RUN apk add --no-cache \
-#         nginx \
-#         supervisor \
-#         curl \
-#         bash
+FROM php:${PHP_VERSION}-fpm-alpine${ALPINE_VERSION} AS runtime
+
+# Install only the runtime dependencies required by the compiled PHP
+# extensions.  Libraries installed here should match those used in
+# the builder; pin versions if necessary.
 RUN apk add --no-cache \
-    nginx \
-    supervisor \
-    curl \
-    bash \
-    libzip \
-    libpng \
-    libjpeg-turbo \
-    freetype \
-    oniguruma \
-    libxml2 \
-    zlib
+        nginx \
+        supervisor \
+        curl \
+        bash \
+        libzip \
+        libpng \
+        libjpeg-turbo \
+        freetype \
+        oniguruma \
+        libxml2 \
+        zlib
 
-# Copy compiled extensions and enablement files from the builder.
+# Copy compiled PHP extensions and configuration from the builder.
 COPY --from=builder /usr/local/lib/php/extensions /usr/local/lib/php/extensions
 COPY --from=builder /usr/local/etc/php/conf.d /usr/local/etc/php/conf.d
 
-# Copy the PHP configuration tuned for production.  Settings such as
-# memory_limit, upload limits and disabled PHP exposure are defined
-# in this file.  See docker/php.ini for details.
+# Copy the tuned PHP configuration.  This file defines sensible
+# production defaults such as memory limits and upload size.
 COPY docker/php.ini /usr/local/etc/php/php.ini
 
-# Copy the application from the builder stage.  We copy the built
-# vendor directory and application source from the builder to avoid
-# rebuilding dependencies in the runtime image.
+# Copy the built application from the builder stage.
 WORKDIR /var/www/bookstack
 COPY --from=builder /build/bookstack /var/www/bookstack
 
-# Copy web server and supervisor configuration.  The nginx
-# configuration serves only the public directory and disables
-# directory indexing for uploads【338446874991254†L210-L215】.  Additional
-# security headers are defined in the file.  Supervisord runs
-# php‑fpm and nginx together in the “web” mode.  For other modes
-# (worker and scheduler) only a single process is required.
+# Copy nginx and supervisor configuration.  nginx serves only the
+# public directory and proxies PHP requests; supervisor starts
+# php‑fpm and nginx together for web mode.
 COPY docker/nginx.conf /etc/nginx/nginx.conf
 COPY docker/supervisord.conf /etc/supervisord.conf
 
-# Copy helper scripts and entrypoint.  These scripts wrap common
-# commands for the different modes of operation.  They are
-# intentionally kept simple so that application behaviour is clearly
-# visible.  All scripts are made executable.
+# Copy helper scripts and entrypoint.  These wrap the common modes
+# (web, worker, scheduler) and perform initialization tasks.
 COPY docker/entrypoint.sh /entrypoint.sh
 COPY docker/run-web.sh /usr/local/bin/run-web
 COPY docker/run-worker.sh /usr/local/bin/run-worker
@@ -140,45 +133,40 @@ COPY docker/run-scheduler.sh /usr/local/bin/run-scheduler
 RUN chmod +x /entrypoint.sh /usr/local/bin/run-* \
     && mkdir -p /run/nginx
 
-# Create a dedicated unprivileged user.  Running as a non‑root user
-# reduces the attack surface.  The UID/GID values are arbitrary but
-# fixed to ensure consistent file ownership when using mounted
-# volumes.  Ownership of the necessary writable directories is
-# assigned to this user.
+# Create a dedicated unprivileged user and ensure all writable
+# directories exist.  The public uploads directory is created here
+# since it does not exist in the source tree.  Directory permissions
+# are set so the bookstack user can write files.
 RUN addgroup -g 1000 bookstack && adduser -D -u 1000 -G bookstack bookstack \
-    # Ensure writable directories exist before changing ownership.  The public/uploads
-    # directory is not present in the source tree and is created on first run.
-    && mkdir -p storage bootstrap/cache public/uploads \
-    && chown -R bookstack:bookstack storage bootstrap/cache public/uploads
+    && mkdir -p storage/framework/sessions storage/framework/views storage/framework/cache \
+    && mkdir -p bootstrap/cache public/uploads \
+    && chown -R bookstack:bookstack storage bootstrap/cache public/uploads \
+    && chmod -R 775 storage bootstrap/cache public/uploads
 
-
-# Make sure Nginx can open its default log files when running as bookstack
+# Create nginx log and temporary directories so nginx can start as
+# an unprivileged user.  These are normally created when running
+# as root; here we pre-create them and assign ownership.
 RUN mkdir -p /var/lib/nginx/logs /var/lib/nginx/tmp/client_body \
     && touch /var/lib/nginx/logs/error.log /var/lib/nginx/logs/access.log \
-    && chown -R bookstack:bookstack /var/lib/nginx
+    && chown -R bookstack:bookstack /var/lib/nginx \
+    && mkdir -p /tmp/nginx/client_body /tmp/nginx/proxy /tmp/nginx/fastcgi /tmp/nginx/uwsgi /tmp/nginx/scgi \
+    && chmod -R 777 /tmp/nginx
 
-RUN mkdir -p /tmp/nginx/{client_body,proxy,fastcgi,uwsgi,scgi} && chmod -R 777 /tmp/nginx
-
-
-# Expose a non‑privileged port.  The web server listens on port
-# 8080; this can be mapped to port 80 or 443 by the orchestrator.
+# Expose the port nginx listens on.  In ECS/EKS you will map this to
+# 80 or 443 behind a load balancer.
 EXPOSE 8080
 
-# Run all subsequent commands as the unprivileged bookstack user.  This
-# ensures that nginx and php‑fpm processes do not run as root.
+# Switch to the unprivileged user for all subsequent operations.
 USER bookstack
 
-# Define a healthcheck that probes the BookStack status endpoint.  It
-# relies on curl which will exit non‑zero on failure.  The timeout is
-# kept short since health checks are run frequently in production.
-HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 CMD curl -f http://localhost:8080/status || exit 1
+# Use a lightweight healthcheck that does not rely on sessions or
+# database.  This path should be configured in your load balancer.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
+  CMD curl -fsS http://127.0.0.1:8080/status || exit 1
 
-# Set the entrypoint.  We use the entrypoint to perform one‑time
-# initialisation tasks such as generating an application key and
-# running migrations when explicitly enabled.  The default command
-# will be overridden based on the desired mode.
+# Set the entrypoint.  The entrypoint handles one‑time setup such as
+# generating the APP_KEY and optionally running migrations.  The
+# default command starts the web server; override it to "worker" or
+# "scheduler" in your orchestrator.
 ENTRYPOINT ["/entrypoint.sh"]
-
-# The default command starts the web server.  Override this to
-# "worker" or "scheduler" in your orchestrator to run other modes.
 CMD ["web"]
